@@ -4,8 +4,8 @@
 float _Radius, _Amount, _DeltaTime, _Extinguishment;
 float4 _Pos, _Size;
 
-RWStructuredBuffer<float> _Write;
-StructuredBuffer<float> _Read, _Reaction;
+RWTexture3D<float> _Write;
+Texture3D<float> _Read, _Reaction;
 
 #pragma kernel GaussImpulse
 
@@ -19,9 +19,7 @@ void GaussImpulse(uint3 id : SV_DispatchThreadID)
 	
 	float amount = exp(-mag/rad2) * _Amount * _DeltaTime;
 				
-	int idx = id.x + id.y*_Size.x + id.z*_Size.x*_Size.y;
-	
-    _Write[idx] = _Read[idx] + amount;
+    _Write[id] = _Read[id] + amount;
 }
 
 #pragma kernel ExtinguishmentImpluse
@@ -29,16 +27,14 @@ void GaussImpulse(uint3 id : SV_DispatchThreadID)
 [numthreads(NUM_THREADS,NUM_THREADS,NUM_THREADS)]
 void ExtinguishmentImpluse(uint3 id : SV_DispatchThreadID)
 {
-			
-	int idx = id.x + id.y*_Size.x + id.z*_Size.x*_Size.y;
 	
 	float amount = 0.0;
-	float reaction = _Reaction[idx];
+	float reaction = _Reaction[id];
 	
 	if(reaction > 0.0 && reaction < _Extinguishment) 
 		amount = _Amount * reaction;
 	
-    _Write[idx] = _Read[idx] + amount;
+    _Write[id] = _Read[id] + amount;
 }
 
 

@@ -1,5 +1,5 @@
 ﻿using UnityEngine;
-using System.Collections;
+using UnityEngine.Rendering;
 
 namespace FluidSim3DProject
 {
@@ -43,8 +43,8 @@ namespace FluidSim3DProject
 		public ComputeShader m_computeConfinement, m_computeObstacles, m_applyBuoyancy;
 		
 		Vector4 m_size;
-		ComputeBuffer[] m_density, m_velocity, m_pressure, m_temperature, m_phi;
-		ComputeBuffer m_temp3f, m_obstacles;
+		public RenderTexture[] m_density, m_velocity, m_pressure, m_temperature, m_phi;
+		public RenderTexture m_temp3f, m_obstacles;
 
 		void Start () 
 		{
@@ -62,41 +62,53 @@ namespace FluidSim3DProject
 			
 			//Create all the buffers needed
 			
-			int SIZE = m_width*m_height*m_depth;
+			m_density = new RenderTexture[2];
+			m_density[READ] = CreateRenderTexture(RenderTextureFormat.RFloat, $"Density {nameof(READ)}");
+			m_density[WRITE] = CreateRenderTexture(RenderTextureFormat.RFloat, $"Density {nameof(WRITE)}");
 			
-			m_density = new ComputeBuffer[2];
-			m_density[READ] = new ComputeBuffer(SIZE, sizeof(float));
-			m_density[WRITE] = new ComputeBuffer(SIZE, sizeof(float));
+			m_temperature = new RenderTexture[2];
+			m_temperature[READ] = CreateRenderTexture(RenderTextureFormat.RFloat, $"Temperature {nameof(READ)}");
+			m_temperature[WRITE] = CreateRenderTexture(RenderTextureFormat.RFloat, $"Temperature {nameof(WRITE)}");
 			
-			m_temperature = new ComputeBuffer[2];
-			m_temperature[READ] = new ComputeBuffer(SIZE, sizeof(float));
-			m_temperature[WRITE] = new ComputeBuffer(SIZE, sizeof(float));
+			m_phi = new RenderTexture[2];
+			m_phi[PHI_N_HAT] = CreateRenderTexture(RenderTextureFormat.RFloat, $"Phi {nameof(PHI_N_HAT)}");
+			m_phi[PHI_N_1_HAT] = CreateRenderTexture(RenderTextureFormat.RFloat, $"Phi {nameof(PHI_N_1_HAT)}");
 			
-			m_phi = new ComputeBuffer[2];
-			m_phi[READ] = new ComputeBuffer(SIZE, sizeof(float));
-			m_phi[WRITE] = new ComputeBuffer(SIZE, sizeof(float));
+			m_velocity = new RenderTexture[2];
+			m_velocity[READ] = CreateRenderTexture(RenderTextureFormat.ARGBFloat, $"Pressure {nameof(READ)}");
+			m_velocity[WRITE] = CreateRenderTexture(RenderTextureFormat.ARGBFloat, $"Pressure {nameof(WRITE)}");
 			
-			m_velocity = new ComputeBuffer[2];
-			m_velocity[READ] = new ComputeBuffer(SIZE, sizeof(float)*3);
-			m_velocity[WRITE] = new ComputeBuffer(SIZE, sizeof(float)*3);
+			m_pressure = new RenderTexture[2];
+			m_pressure[READ] = CreateRenderTexture(RenderTextureFormat.RFloat, $"Pressure {nameof(READ)}");
+			m_pressure[WRITE] = CreateRenderTexture(RenderTextureFormat.RFloat, $"Pressure {nameof(WRITE)}");
 			
-			m_pressure = new ComputeBuffer[2];
-			m_pressure[READ] = new ComputeBuffer(SIZE, sizeof(float));
-			m_pressure[WRITE] = new ComputeBuffer(SIZE, sizeof(float));
+			m_obstacles = CreateRenderTexture(RenderTextureFormat.RFloat, "Obstacles");
 			
-			m_obstacles = new ComputeBuffer(SIZE, sizeof(float));
-			
-			m_temp3f = new ComputeBuffer(SIZE, sizeof(float)*3);
+			m_temp3f = CreateRenderTexture(RenderTextureFormat.ARGBFloat, "temp3f");
 			
 			//Any areas that are obstacles need to be masked of in the obstacle buffer
 			//At the moment is only the border around the edge of the buffers to enforce non-slip boundary conditions
 			ComputeObstacles();
 		
 		}
-		
-		void Swap(ComputeBuffer[] buffer)
+
+		private RenderTexture CreateRenderTexture(RenderTextureFormat format, string name)
 		{
-			ComputeBuffer tmp = buffer[READ];
+			var rt = new RenderTexture(m_width, m_height, 0, format);
+			rt.name = name;
+			rt.dimension = TextureDimension.Tex3D;
+			rt.volumeDepth = m_depth;
+			rt.enableRandomWrite = true;
+			rt.anisoLevel = 0;
+			rt.filterMode = FilterMode.Bilinear;
+
+			rt.Create();
+			return rt;
+		}
+		
+		void Swap(RenderTexture[] buffer)
+		{
+			RenderTexture tmp = buffer[READ];
 			buffer[READ] = buffer[WRITE];
 			buffer[WRITE] = tmp;
 		}
@@ -104,12 +116,12 @@ namespace FluidSim3DProject
 		void ComputeObstacles()
 		{
 			m_computeObstacles.SetVector("_Size", m_size);
-			m_computeObstacles.SetBuffer(0, "_Write", m_obstacles);
+			m_computeObstacles.SetTexture(0, "_Write", m_obstacles);
 			m_computeObstacles.Dispatch(0, (int)m_size.x/NUM_THREADS, (int)m_size.y/NUM_THREADS, (int)m_size.z/NUM_THREADS);
 			
 		}
 		
-		void ApplyImpulse(float dt, float amount, ComputeBuffer[] buffer)
+		void ApplyImpulse(float dt, float amount, RenderTexture[] buffer)
 		{
 			m_applyImpulse.SetVector("_Size", m_size);
 			m_applyImpulse.SetFloat("_Radius", m_inputRadius);
@@ -117,8 +129,8 @@ namespace FluidSim3DProject
 			m_applyImpulse.SetFloat("_DeltaTime", dt);
 			m_applyImpulse.SetVector("_Pos", m_inputPos);
 			
-			m_applyImpulse.SetBuffer(0, "_Read", buffer[READ]);
-			m_applyImpulse.SetBuffer(0, "_Write", buffer[WRITE]);
+			m_applyImpulse.SetTexture(0, "_Read", buffer[READ]);
+			m_applyImpulse.SetTexture(0, "_Write", buffer[WRITE]);
 			
 			m_applyImpulse.Dispatch(0, (int)m_size.x/NUM_THREADS, (int)m_size.y/NUM_THREADS, (int)m_size.z/NUM_THREADS);
 			
@@ -134,17 +146,17 @@ namespace FluidSim3DProject
 			m_applyBuoyancy.SetFloat("_Weight", m_densityWeight);
 			m_applyBuoyancy.SetFloat("_DeltaTime", dt);
 			
-			m_applyBuoyancy.SetBuffer(0, "_Write", m_velocity[WRITE]);
-			m_applyBuoyancy.SetBuffer(0, "_Velocity", m_velocity[READ]);
-			m_applyBuoyancy.SetBuffer(0, "_Density", m_density[READ]);
-			m_applyBuoyancy.SetBuffer(0, "_Temperature", m_temperature[READ]);
+			m_applyBuoyancy.SetTexture(0, "_Write", m_velocity[WRITE]);
+			m_applyBuoyancy.SetTexture(0, "_Velocity", m_velocity[READ]);
+			m_applyBuoyancy.SetTexture(0, "_Density", m_density[READ]);
+			m_applyBuoyancy.SetTexture(0, "_Temperature", m_temperature[READ]);
 			
 			m_applyBuoyancy.Dispatch(0, (int)m_size.x/NUM_THREADS, (int)m_size.y/NUM_THREADS, (int)m_size.z/NUM_THREADS);
 			
 			Swap(m_velocity);
 		}
 		
-		void ApplyAdvection(float dt, float dissipation, float decay, ComputeBuffer[] buffer, float forward = 1.0f)
+		void ApplyAdvection(float dt, float dissipation, float decay, RenderTexture[] buffer, float forward = 1.0f)
 		{
 			m_applyAdvect.SetVector("_Size", m_size);
 			m_applyAdvect.SetFloat("_DeltaTime", dt);
@@ -152,17 +164,17 @@ namespace FluidSim3DProject
 			m_applyAdvect.SetFloat("_Forward", forward);
 			m_applyAdvect.SetFloat("_Decay", decay);
 			
-			m_applyAdvect.SetBuffer((int)ADVECTION.NORMAL, "_Read1f", buffer[READ]);
-			m_applyAdvect.SetBuffer((int)ADVECTION.NORMAL, "_Write1f", buffer[WRITE]);
-			m_applyAdvect.SetBuffer((int)ADVECTION.NORMAL, "_Velocity", m_velocity[READ]);
-			m_applyAdvect.SetBuffer((int)ADVECTION.NORMAL, "_Obstacles", m_obstacles);
+			m_applyAdvect.SetTexture((int)ADVECTION.NORMAL, "_Read1f", buffer[READ]);
+			m_applyAdvect.SetTexture((int)ADVECTION.NORMAL, "_Write1f", buffer[WRITE]);
+			m_applyAdvect.SetTexture((int)ADVECTION.NORMAL, "_Velocity", m_velocity[READ]);
+			m_applyAdvect.SetTexture((int)ADVECTION.NORMAL, "_Obstacles", m_obstacles);
 			
 			m_applyAdvect.Dispatch((int)ADVECTION.NORMAL, (int)m_size.x/NUM_THREADS, (int)m_size.y/NUM_THREADS, (int)m_size.z/NUM_THREADS);
 			
 			Swap(buffer);
 		}
 		
-		void ApplyAdvection(float dt, float dissipation, float decay, ComputeBuffer read, ComputeBuffer write, float forward = 1.0f)
+		void ApplyAdvection(float dt, float dissipation, float decay, RenderTexture read, RenderTexture write, float forward = 1.0f)
 		{
 			m_applyAdvect.SetVector("_Size", m_size);
 			m_applyAdvect.SetFloat("_DeltaTime", dt);
@@ -170,15 +182,15 @@ namespace FluidSim3DProject
 			m_applyAdvect.SetFloat("_Forward", forward);
 			m_applyAdvect.SetFloat("_Decay", decay);
 			
-			m_applyAdvect.SetBuffer((int)ADVECTION.NORMAL, "_Read1f", read);
-			m_applyAdvect.SetBuffer((int)ADVECTION.NORMAL, "_Write1f", write);
-			m_applyAdvect.SetBuffer((int)ADVECTION.NORMAL, "_Velocity", m_velocity[READ]);
-			m_applyAdvect.SetBuffer((int)ADVECTION.NORMAL, "_Obstacles", m_obstacles);
+			m_applyAdvect.SetTexture((int)ADVECTION.NORMAL, "_Read1f", read);
+			m_applyAdvect.SetTexture((int)ADVECTION.NORMAL, "_Write1f", write);
+			m_applyAdvect.SetTexture((int)ADVECTION.NORMAL, "_Velocity", m_velocity[READ]);
+			m_applyAdvect.SetTexture((int)ADVECTION.NORMAL, "_Obstacles", m_obstacles);
 			
 			m_applyAdvect.Dispatch((int)ADVECTION.NORMAL, (int)m_size.x/NUM_THREADS, (int)m_size.y/NUM_THREADS, (int)m_size.z/NUM_THREADS);
 		}
 		
-		void ApplyAdvectionBFECC(float dt, float dissipation, float decay, ComputeBuffer[] buffer)
+		void ApplyAdvectionBFECC(float dt, float dissipation, float decay, RenderTexture[] buffer)
 		{
 			m_applyAdvect.SetVector("_Size", m_size);
 			m_applyAdvect.SetFloat("_DeltaTime", dt);
@@ -186,18 +198,18 @@ namespace FluidSim3DProject
 			m_applyAdvect.SetFloat("_Forward", 1.0f);
 			m_applyAdvect.SetFloat("_Decay", decay);
 			
-			m_applyAdvect.SetBuffer((int)ADVECTION.BFECC, "_Read1f", buffer[READ]);
-			m_applyAdvect.SetBuffer((int)ADVECTION.BFECC, "_Write1f", buffer[WRITE]);
-			m_applyAdvect.SetBuffer((int)ADVECTION.BFECC, "_Phi_n_hat", m_phi[PHI_N_HAT]);
-			m_applyAdvect.SetBuffer((int)ADVECTION.BFECC, "_Velocity", m_velocity[READ]);
-			m_applyAdvect.SetBuffer((int)ADVECTION.BFECC, "_Obstacles", m_obstacles);
+			m_applyAdvect.SetTexture((int)ADVECTION.BFECC, "_Read1f", buffer[READ]);
+			m_applyAdvect.SetTexture((int)ADVECTION.BFECC, "_Write1f", buffer[WRITE]);
+			m_applyAdvect.SetTexture((int)ADVECTION.BFECC, "_Phi_n_hat", m_phi[PHI_N_HAT]);
+			m_applyAdvect.SetTexture((int)ADVECTION.BFECC, "_Velocity", m_velocity[READ]);
+			m_applyAdvect.SetTexture((int)ADVECTION.BFECC, "_Obstacles", m_obstacles);
 			
 			m_applyAdvect.Dispatch((int)ADVECTION.BFECC, (int)m_size.x/NUM_THREADS, (int)m_size.y/NUM_THREADS, (int)m_size.z/NUM_THREADS);
 			
 			Swap(buffer);
 		}
 		
-		void ApplyAdvectionMacCormack(float dt, float dissipation, float decay, ComputeBuffer[] buffer)
+		void ApplyAdvectionMacCormack(float dt, float dissipation, float decay, RenderTexture[] buffer)
 		{
 			m_applyAdvect.SetVector("_Size", m_size);
 			m_applyAdvect.SetFloat("_DeltaTime", dt);
@@ -205,12 +217,12 @@ namespace FluidSim3DProject
 			m_applyAdvect.SetFloat("_Forward", 1.0f);
 			m_applyAdvect.SetFloat("_Decay", decay);
 			
-			m_applyAdvect.SetBuffer((int)ADVECTION.MACCORMACK, "_Read1f", buffer[READ]);
-			m_applyAdvect.SetBuffer((int)ADVECTION.MACCORMACK, "_Write1f", buffer[WRITE]);
-			m_applyAdvect.SetBuffer((int)ADVECTION.MACCORMACK, "_Phi_n_1_hat", m_phi[PHI_N_1_HAT]);
-			m_applyAdvect.SetBuffer((int)ADVECTION.MACCORMACK, "_Phi_n_hat", m_phi[PHI_N_HAT]);
-			m_applyAdvect.SetBuffer((int)ADVECTION.MACCORMACK, "_Velocity", m_velocity[READ]);
-			m_applyAdvect.SetBuffer((int)ADVECTION.MACCORMACK, "_Obstacles", m_obstacles);
+			m_applyAdvect.SetTexture((int)ADVECTION.MACCORMACK, "_Read1f", buffer[READ]);
+			m_applyAdvect.SetTexture((int)ADVECTION.MACCORMACK, "_Write1f", buffer[WRITE]);
+			m_applyAdvect.SetTexture((int)ADVECTION.MACCORMACK, "_Phi_n_1_hat", m_phi[PHI_N_1_HAT]);
+			m_applyAdvect.SetTexture((int)ADVECTION.MACCORMACK, "_Phi_n_hat", m_phi[PHI_N_HAT]);
+			m_applyAdvect.SetTexture((int)ADVECTION.MACCORMACK, "_Velocity", m_velocity[READ]);
+			m_applyAdvect.SetTexture((int)ADVECTION.MACCORMACK, "_Obstacles", m_obstacles);
 			
 			m_applyAdvect.Dispatch((int)ADVECTION.MACCORMACK, (int)m_size.x/NUM_THREADS, (int)m_size.y/NUM_THREADS, (int)m_size.z/NUM_THREADS);
 			
@@ -225,10 +237,10 @@ namespace FluidSim3DProject
 			m_applyAdvect.SetFloat("_Forward", 1.0f);
 			m_applyAdvect.SetFloat("_Decay", 0.0f);
 			
-			m_applyAdvect.SetBuffer(0, "_Read3f", m_velocity[READ]);
-			m_applyAdvect.SetBuffer(0, "_Write3f", m_velocity[WRITE]);
-			m_applyAdvect.SetBuffer(0, "_Velocity", m_velocity[READ]);
-			m_applyAdvect.SetBuffer(0, "_Obstacles", m_obstacles);
+			m_applyAdvect.SetTexture(0, "_Read3f", m_velocity[READ]);
+			m_applyAdvect.SetTexture(0, "_Write3f", m_velocity[WRITE]);
+			m_applyAdvect.SetTexture(0, "_Velocity", m_velocity[READ]);
+			m_applyAdvect.SetTexture(0, "_Obstacles", m_obstacles);
 			
 			m_applyAdvect.Dispatch(0, (int)m_size.x/NUM_THREADS, (int)m_size.y/NUM_THREADS, (int)m_size.z/NUM_THREADS);
 			
@@ -239,8 +251,8 @@ namespace FluidSim3DProject
 		{
 			m_computeVorticity.SetVector("_Size", m_size);
 			
-			m_computeVorticity.SetBuffer(0, "_Write", m_temp3f);
-			m_computeVorticity.SetBuffer(0, "_Velocity", m_velocity[READ]);
+			m_computeVorticity.SetTexture(0, "_Write", m_temp3f);
+			m_computeVorticity.SetTexture(0, "_Velocity", m_velocity[READ]);
 			
 			m_computeVorticity.Dispatch(0, (int)m_size.x/NUM_THREADS, (int)m_size.y/NUM_THREADS, (int)m_size.z/NUM_THREADS);
 			
@@ -248,9 +260,9 @@ namespace FluidSim3DProject
 			m_computeConfinement.SetFloat("_DeltaTime", dt);
 			m_computeConfinement.SetFloat("_Epsilon", m_vorticityStrength);
 			
-			m_computeConfinement.SetBuffer(0, "_Write", m_velocity[WRITE]);
-			m_computeConfinement.SetBuffer(0, "_Read", m_velocity[READ]);
-			m_computeConfinement.SetBuffer(0, "_Vorticity", m_temp3f);
+			m_computeConfinement.SetTexture(0, "_Write", m_velocity[WRITE]);
+			m_computeConfinement.SetTexture(0, "_Read", m_velocity[READ]);
+			m_computeConfinement.SetTexture(0, "_Vorticity", m_temp3f);
 			
 			m_computeConfinement.Dispatch(0, (int)m_size.x/NUM_THREADS, (int)m_size.y/NUM_THREADS, (int)m_size.z/NUM_THREADS);
 			
@@ -261,9 +273,9 @@ namespace FluidSim3DProject
 		{
 			m_computeDivergence.SetVector("_Size", m_size);
 			
-			m_computeDivergence.SetBuffer(0, "_Write", m_temp3f);
-			m_computeDivergence.SetBuffer(0, "_Velocity", m_velocity[READ]);
-			m_computeDivergence.SetBuffer(0, "_Obstacles", m_obstacles);
+			m_computeDivergence.SetTexture(0, "_Write", m_temp3f);
+			m_computeDivergence.SetTexture(0, "_Velocity", m_velocity[READ]);
+			m_computeDivergence.SetTexture(0, "_Obstacles", m_obstacles);
 			
 			m_computeDivergence.Dispatch(0, (int)m_size.x/NUM_THREADS, (int)m_size.y/NUM_THREADS, (int)m_size.z/NUM_THREADS);
 		}
@@ -271,13 +283,13 @@ namespace FluidSim3DProject
 		void ComputePressure()
 		{
 			m_computeJacobi.SetVector("_Size", m_size);
-			m_computeJacobi.SetBuffer(0, "_Divergence", m_temp3f);
-			m_computeJacobi.SetBuffer(0, "_Obstacles", m_obstacles);
+			m_computeJacobi.SetTexture(0, "_Divergence", m_temp3f);
+			m_computeJacobi.SetTexture(0, "_Obstacles", m_obstacles);
 			
 			for(int i = 0; i < m_iterations; i++)
 			{
-				m_computeJacobi.SetBuffer(0, "_Write", m_pressure[WRITE]);
-				m_computeJacobi.SetBuffer(0, "_Pressure", m_pressure[READ]);
+				m_computeJacobi.SetTexture(0, "_Write", m_pressure[WRITE]);
+				m_computeJacobi.SetTexture(0, "_Pressure", m_pressure[READ]);
 				
 				m_computeJacobi.Dispatch(0, (int)m_size.x/NUM_THREADS, (int)m_size.y/NUM_THREADS, (int)m_size.z/NUM_THREADS);
 				
@@ -288,11 +300,11 @@ namespace FluidSim3DProject
 		void ComputeProjection()
 		{
 			m_computeProjection.SetVector("_Size", m_size);
-			m_computeProjection.SetBuffer(0, "_Obstacles", m_obstacles);
+			m_computeProjection.SetTexture(0, "_Obstacles", m_obstacles);
 			
-			m_computeProjection.SetBuffer(0, "_Pressure", m_pressure[READ]);
-			m_computeProjection.SetBuffer(0, "_Velocity", m_velocity[READ]);
-			m_computeProjection.SetBuffer(0, "_Write", m_velocity[WRITE]);
+			m_computeProjection.SetTexture(0, "_Pressure", m_pressure[READ]);
+			m_computeProjection.SetTexture(0, "_Velocity", m_velocity[READ]);
+			m_computeProjection.SetTexture(0, "_Write", m_velocity[WRITE]);
 			
 			m_computeProjection.Dispatch(0, (int)m_size.x/NUM_THREADS, (int)m_size.y/NUM_THREADS, (int)m_size.z/NUM_THREADS);
 			
@@ -358,25 +370,24 @@ namespace FluidSim3DProject
 			
 			GetComponent<Renderer>().material.SetVector("_Translate", transform.localPosition);
 			GetComponent<Renderer>().material.SetVector("_Scale", transform.localScale);
-			GetComponent<Renderer>().material.SetBuffer("_Density", m_density[READ]);
-			GetComponent<Renderer>().material.SetVector("_Size", m_size);
+			GetComponent<Renderer>().material.SetTexture("_Density", m_density[READ]);
 		
 		}
 		
 		void OnDestroy()
 		{
-			m_density[READ].Release();	
-			m_density[WRITE].Release();
-			m_temperature[READ].Release();
-			m_temperature[WRITE].Release();
-			m_phi[PHI_N_1_HAT].Release();	
-			m_phi[PHI_N_HAT].Release();
-			m_velocity[READ].Release();
-			m_velocity[WRITE].Release();
-			m_pressure[READ].Release();
-			m_pressure[WRITE].Release();
-			m_obstacles.Release();
-			m_temp3f.Release();
+			Destroy(m_density[READ]);	
+			Destroy(m_density[WRITE]);
+			Destroy(m_temperature[READ]);
+			Destroy(m_temperature[WRITE]);
+			Destroy(m_phi[PHI_N_1_HAT]);	
+			Destroy(m_phi[PHI_N_HAT]);
+			Destroy(m_velocity[READ]);
+			Destroy(m_velocity[WRITE]);
+			Destroy(m_pressure[READ]);
+			Destroy(m_pressure[WRITE]);
+			Destroy(m_obstacles);
+			Destroy(m_temp3f);
 					
 		}
 	}

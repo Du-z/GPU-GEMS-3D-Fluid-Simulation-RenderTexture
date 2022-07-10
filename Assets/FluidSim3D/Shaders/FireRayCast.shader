@@ -33,9 +33,10 @@ Shader "3DFluidSim/FireRayCast"
 			sampler2D _FireGradient;
 			float4 _SmokeColor;
 			float _SmokeAbsorption, _FireAbsorption;
-			uniform float3 _Translate, _Scale, _Size;
+			uniform float3 _Translate, _Scale;
 			
-			StructuredBuffer<float> _Density, _Reaction;
+			Texture3D<float> _Density, _Reaction;
+			SamplerState _LinearClamp;
 		
 			struct v2f 
 			{
@@ -74,39 +75,6 @@ Shader "3DFluidSim/FireRayCast"
 			    t = min(tmax.xx, tmax.yz);
 			    t1 = min(t.x, t.y);
 			    return t0 <= t1;
-			}
-			
-			float SampleBilinear(StructuredBuffer<float> buffer, float3 uv, float3 size)
-			{
-				uv = saturate(uv);
-				uv = uv * (size-1.0);
-			
-				int x = uv.x;
-				int y = uv.y;
-				int z = uv.z;
-				
-				int X = size.x;
-				int XY = size.x*size.y;
-				
-				float fx = uv.x-x;
-				float fy = uv.y-y;
-				float fz = uv.z-z;
-				
-				int xp1 = min(_Size.x-1, x+1);
-				int yp1 = min(_Size.y-1, y+1);
-				int zp1 = min(_Size.z-1, z+1);
-				
-				float x0 = buffer[x+y*X+z*XY] * (1.0f-fx) + buffer[xp1+y*X+z*XY] * fx;
-				float x1 = buffer[x+y*X+zp1*XY] * (1.0f-fx) + buffer[xp1+y*X+zp1*XY] * fx;
-				
-				float x2 = buffer[x+yp1*X+z*XY] * (1.0f-fx) + buffer[xp1+yp1*X+z*XY] * fx;
-				float x3 = buffer[x+yp1*X+zp1*XY] * (1.0f-fx) + buffer[xp1+yp1*X+zp1*XY] * fx;
-				
-				float z0 = x0 * (1.0f-fz) + x1 * fz;
-				float z1 = x2 * (1.0f-fz) + x3 * fz;
-				
-				return z0 * (1.0f-fy) + z1 * fy;
-				
 			}
 
 			
@@ -147,9 +115,9 @@ Shader "3DFluidSim/FireRayCast"
    				for(int i=0; i < NUM_SAMPLES; i++, start += ds) 
    				{
    				 
-   					float D = SampleBilinear(_Density, start, _Size);
+   					float D = _Density.SampleLevel(_LinearClamp, start, 0);
    					
-   					float R = SampleBilinear(_Reaction, start, _Size);
+   					float R = _Reaction.SampleLevel(_LinearClamp, start, 0);
    				 	
         			fireAlpha *= 1.0-saturate(R*stepSize*_FireAbsorption);
         			

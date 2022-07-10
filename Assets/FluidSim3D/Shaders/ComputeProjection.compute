@@ -4,29 +4,28 @@
 
 float4 _Size;
 
-RWStructuredBuffer<float3> _Write;
-StructuredBuffer<float> _Pressure, _Obstacles;
-StructuredBuffer<float3> _Velocity;
+RWTexture3D<float3> _Write;
+Texture3D<float> _Pressure, _Obstacles;
+Texture3D<float3> _Velocity;
 
 [numthreads(NUM_THREADS,NUM_THREADS,NUM_THREADS)]
 void CSMain (int3 id : SV_DispatchThreadID)
 {
-	int idx = id.x + id.y*_Size.x + id.z*_Size.x*_Size.y;
 
-	if(_Obstacles[idx] > 0.1)
+	if(_Obstacles[id] > 0.1)
 	{
-		 _Write[idx] = float3(0,0,0);
+		 _Write[id] = float3(0,0,0);
 		 return;
 	}
 
-    int idxL = max(0, id.x-1) + id.y*_Size.x + id.z*_Size.x*_Size.y;
-    int idxR = min(_Size.x-1, id.x+1) + id.y*_Size.x + id.z*_Size.x*_Size.y;
+    int3 idxL = int3(max(0, id.x-1), id.y, id.z);
+    int3 idxR = int3(min(_Size.x-1, id.x+1), id.y, id.z);
     
-    int idxB = id.x + max(0, id.y-1)*_Size.x + id.z*_Size.x*_Size.y;
-    int idxT = id.x + min(_Size.y-1, id.y+1)*_Size.x + id.z*_Size.x*_Size.y;
+    int3 idxB = int3(id.x, max(0, id.y-1), id.z);
+    int3 idxT = int3(id.x, min(_Size.y-1, id.y+1), id.z);
     
-    int idxD = id.x + id.y*_Size.x + max(0, id.z-1)*_Size.x*_Size.y;
-    int idxU = id.x + id.y*_Size.x + min(_Size.z-1, id.z+1)*_Size.x*_Size.y;
+    int3 idxD = int3(id.x, id.y, max(0, id.z-1));
+    int3 idxU = int3(id.x, id.y, min(_Size.z-1, id.z+1));
     
 	float L = _Pressure[ idxL ];
     float R = _Pressure[ idxR ];
@@ -37,7 +36,7 @@ void CSMain (int3 id : SV_DispatchThreadID)
     float D = _Pressure[ idxD ];
     float U = _Pressure[ idxU ];
     
-    float C = _Pressure[idx];
+    float C = _Pressure[id];
     
     float3 mask = float3(1,1,1);
     
@@ -50,9 +49,9 @@ void CSMain (int3 id : SV_DispatchThreadID)
     if(_Obstacles[idxD] > 0.1) { D = C; mask.z = 0; }
     if(_Obstacles[idxU] > 0.1) { U = C; mask.z = 0; }
     
-    float3 v = _Velocity[idx] - float3( R - L, T - B, U - D ) * 0.5;
+    float3 v = _Velocity[id] - float3( R - L, T - B, U - D ) * 0.5;
     
-    _Write[idx] = v * mask;
+    _Write[id] = v * mask;
 }
 
 
